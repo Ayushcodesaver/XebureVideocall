@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
@@ -61,6 +62,12 @@ const ChatPage = () => {
 
   const { authUser } = useAuthUser();
 
+  useEffect(() => {
+    if (authUser) {
+      console.log("👤 FRONTEND AUTH USER ID:", authUser._id);
+    }
+  }, [authUser]);
+
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
     queryFn: getStreamToken,
@@ -74,39 +81,52 @@ const ChatPage = () => {
     }
   }, [messages]);
 
-  // ✅ Keep ref updated with latest videoClient
+  // ✅ Keep ref updated with latest videoClient + DEBUG user info
   useEffect(() => {
     videoClientRef.current = videoClient;
     console.log("📹 Video client ref updated:", !!videoClient);
+    
+    // 🔥 DEBUG: Check videoClient connection state
+    if (videoClient) {
+      console.log("🔥 FINAL VIDEO CLIENT:", { 
+        userID: videoClient?.user?.id, 
+        ws: videoClient?.wsConnection?.state, 
+      });
+    } else {
+      console.log("❌ No videoClient available for user");
+    }
   }, [videoClient]);
 
   // ✅ Fixed wait function - reads from REF, not closure
   const waitForVideoClient = useCallback(() => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let attempts = 0;
       const maxAttempts = 50; // 10 seconds max (200ms * 50)
 
-      // ✅ Read from ref for LIVE value (fixes stale closure)
-      if (videoClientRef.current) {
-        console.log("✅ Video client already ready (from ref)");
-        resolve(true);
-        return;
-      }
+      const checkClient = () => {
+        const client = videoClientRef.current;
+        if (client && client.user) {
+          console.log(`✅ Video client ready after ${attempts * 200}ms`);
+          resolve(true);
+          return true;
+        }
+        return false;
+      };
 
-      console.log("⏳ Waiting for video client to initialize...");
+      // ✅ Initial check
+      if (checkClient()) return;
+
+      console.log("⏳ Waiting for video client and user to be ready...");
       
       const interval = setInterval(() => {
         attempts++;
         
-        // ✅ Always reads CURRENT value via ref
-        if (videoClientRef.current) {
-          console.log(`✅ Video client ready after ${attempts * 200}ms`);
+        if (checkClient()) {
           clearInterval(interval);
-          resolve(true);
         } else if (attempts >= maxAttempts) {
           clearInterval(interval);
-          console.error(`❌ Video client timeout after ${maxAttempts * 200}ms`);
-          reject(new Error("Video client initialization timeout"));
+          console.log(`⚠️ Video client wait limit reached after ${maxAttempts * 200}ms`);
+          resolve(false); // ✅ Just resolve false instead of error
         }
       }, 200);
     });
@@ -125,7 +145,7 @@ const ChatPage = () => {
   const playRingtone = useCallback(() => {
     try {
       stopRingtone();
-      ringtoneRef.current = new Audio("/ringtone.mp3");
+      ringtoneRef.current = new Audio("/new-tone.mp3");
       ringtoneRef.current.loop = true;
       ringtoneRef.current.play().catch(() => console.log("Audio play failed"));
     } catch (error) {
@@ -133,74 +153,100 @@ const ChatPage = () => {
     }
   }, [stopRingtone]);
 
-  // ✅ FIXED: Listen for incoming calls - Use videoClient directly for reliability
+  // 🔥 DEBUG: Periodic check of videoClient connection state
   useEffect(() => {
     if (!videoClient) return;
-
-    console.log("🎧 Setting up call listeners...");
     
-    const handleCallRinging = (e) => {
-      console.log('Call ringing:', e);
-      const call = e.call;
-      if (call && call.id) {
-        setIncomingCall({
-          id: call.id,
-          caller: call.createdBy || { name: authUser?.fullName || "Someone" },
-          timestamp: new Date(),
-        });
-        playRingtone();
-        toast.success(`Incoming call!`, { duration: 30000, icon: "📞" });
-      }
+    const interval = setInterval(() => {
+      console.log("🔄 [HEARTBEAT] Video Client Status:", {
+        userId: videoClient?.user?.id,
+        wsState: videoClient?.wsConnection?.state,
+        timestamp: new Date().toISOString()
+      });
+    }, 10000); // Every 10 seconds
+    
+    return () => clearInterval(interval);
+  }, [videoClient]);
+
+  // 🔥 DEBUG: Log incoming call state changes
+  useEffect(() => {
+    console.log("📞 IncomingCall state updated:", incomingCall);
+  }, [incomingCall]);
+
+  // ✅ FINAL FIXED: Listen for incoming calls
+  useEffect(() => {
+    if (!videoClient) {
+      console.log("⛔ No videoClient yet");
+      return;
+    }
+
+    console.log("🎧 Setting up call listener...");
+    console.log("📹 CLIENT USER:", videoClient.user?.id);
+
+    const handleIncomingCall = (event) => {
+      console.log("📞 INCOMING CALL EVENT:", event);
+      if (!event.call) return;
+      
+      setIncomingCall(event.call);
+      playRingtone();
+      
+      const callerName = event.call.created_by?.name || event.call.created_by_id || "Someone";
+      toast.success(`📞 Incoming call from ${callerName}!`, { duration: 30000, icon: "📞" });
     };
 
-    videoClient.on('call.ringing', handleCallRinging);
-    
+    // ✅ attach listener
+    videoClient.on("call.ringing", handleIncomingCall);
+    console.log("✅ call.ringing listener attached");
+
+    // cleanup
     return () => {
-      videoClient.off('call.ringing', handleCallRinging);
+      console.log("🧹 removing listener...");
+      videoClient.off("call.ringing", handleIncomingCall);
       stopRingtone();
     };
-  }, [videoClient, authUser, playRingtone, stopRingtone]);
+  }, [videoClient, playRingtone, stopRingtone]);
 
-  // ✅ FIXED: Accept call handler - Navigate FIRST, then join (WhatsApp style)
+  // ✅ FIXED: Accept call handler - Join properly
   const acceptCall = async () => {
+    console.log("✅ Accept call clicked, incomingCall:", incomingCall);
     stopRingtone();
-    const client = videoClientRef.current;
     
-    if (incomingCall && client) {
+    if (incomingCall) {
       try {
-        const call = client.call("default", incomingCall.id);
+        // ✅ Join the call directly
+        console.log("📞 Joining call...");
+        await incomingCall.join();
         
-        // ✅ FIRST: Navigate to call screen (instant UI)
+        console.log("✅ Successfully joined, navigating...");
+        // ✅ Navigate to call screen
         navigate(`/call/${incomingCall.id}`);
-        
-        // ✅ THEN: Join in background (WhatsApp style)
-        if (!call.state?.joined) {
-          call.join().catch(() => {
-            toast.error("Failed to join call");
-          });
-        }
         
         setIncomingCall(null);
       } catch (error) {
         console.error("Error accepting call:", error);
         toast.error("Failed to accept call");
       }
+    } else {
+      console.error("❌ Cannot accept call - missing incomingCall");
     }
   };
 
-  // ✅ FIXED: Reject call handler using REF
+  // ✅ FIXED: Reject call handler
   const rejectCall = async () => {
+    console.log("❌ Reject call clicked, incomingCall:", incomingCall);
     stopRingtone();
-    const client = videoClientRef.current;
     
-    if (incomingCall && client) {
+    if (incomingCall) {
       try {
-        const call = client.call("default", incomingCall.id);
-        await call.reject();
+        console.log("📞 Leaving/Rejecting call...");
+        await incomingCall.leave();
         toast.success("Call rejected");
       } catch (error) {
         console.error("Error rejecting call:", error);
+        toast.error("Failed to reject call");
       }
+    } else {
+      console.error("❌ Cannot reject call - missing incomingCall");
     }
     setIncomingCall(null);
   };
@@ -374,92 +420,117 @@ const ChatPage = () => {
   }, [chatClient]);
 
   // ✅ FIXED: Video call handler - NO members, NO join
-  const handleVideoCall = async () => {
-    if (!channel || !authUser || !tokenData?.token) {
-      toast.error("Not connected. Please reconnect first.");
+// ✅ SIMPLIFIED Video call handler
+const handleVideoCall = async () => {
+  if (!channel || !authUser || !tokenData?.token) {
+    toast.error("Not connected. Please reconnect first.");
+    return;
+  }
+
+  if (isJoiningCall) return;
+  
+  setIsJoiningCall(true);
+  
+  try {
+    toast.loading("Starting video call...", { id: "call" });
+    
+    const ready = await waitForVideoClient();
+    if (!ready) {
+      toast.error("Video client not ready. Please try again.");
+      toast.dismiss("call");
       return;
     }
-
-    if (isJoiningCall) return;
     
-    setIsJoiningCall(true);
+    const client = videoClientRef.current;
+    const callId = `call_${channel.id}`;
+    const call = client.call("default", callId);
     
-    try {
-      toast.loading("Preparing call...", { id: "call" });
-      
-      await waitForVideoClient();
-      
-      const client = videoClientRef.current;
-      const callId = `call_${channel.id}`;
-      const call = client.call("default", callId);
-      
-      // ✅ REMOVED members array - Stream auto handles
-      await call.getOrCreate({
-        data: {
-          created_by_id: authUser._id,
-        },
-        ringing: { timeout: 30000 }
-      });
-      
-      toast.dismiss("call");
-      navigate(`/call/${callId}`);
-      
-      // ✅ REMOVED call.join() - CallPage handles join
-      
-    } catch (error) {
-      console.error("Error starting video call:", error);
-      toast.error(error.message || "Failed to start video call");
-      toast.dismiss("call");
-    } finally {
-      setIsJoiningCall(false);
-    }
-  };
+    // ✅ Setup call with members so ringing triggers correctly
+    await call.getOrCreate({
+      data: {
+        members: [
+          { user_id: authUser._id.toString() },
+          { user_id: targetUserId.toString() },
+        ],
+      },
+      ringing: true
+    });
+    
+    // 🔥 MUST: Trigger ringing on receiver's side
+    await call.ring();
+    
+    console.log("🔔 Video call ringing initiated for:", callId);
+    toast.dismiss("call");
+    toast.success("Calling...");
+    
+    navigate(`/call/${callId}?type=video`);
+    
+  } catch (error) {
+    console.error("Error starting video call:", error);
+    toast.error(error.message || "Failed to start video call");
+    toast.dismiss("call");
+  } finally {
+    setIsJoiningCall(false);
+  }
+};
 
-  // ✅ FIXED: Audio call handler - NO members, NO join
-  const handleAudioCall = async () => {
-    if (!channel || !authUser || !tokenData?.token) {
-      toast.error("Not connected. Please reconnect first.");
+// ✅ SIMPLIFIED Audio call handler
+const handleAudioCall = async () => {
+  if (!channel || !authUser || !tokenData?.token) {
+    toast.error("Not connected. Please reconnect first.");
+    return;
+  }
+
+  if (isJoiningCall) return;
+  
+  setIsJoiningCall(true);
+  
+  try {
+    toast.loading("Starting audio call...", { id: "call" });
+    
+    const ready = await waitForVideoClient();
+    if (!ready) {
+      toast.error("Video client not ready. Please try again.");
+      toast.dismiss("call");
       return;
     }
-
-    if (isJoiningCall) return;
     
-    setIsJoiningCall(true);
+    const client = videoClientRef.current;
+    const callId = `audio_${channel.id}`;
+    const call = client.call("default", callId);
     
-    try {
-      toast.loading("Preparing call...", { id: "call" });
-      
-      await waitForVideoClient();
-      
-      const client = videoClientRef.current;
-      const callId = `audio_${channel.id}`;
-      const call = client.call("default", callId);
-      
-      // ✅ REMOVED members array - Stream auto handles
-      await call.getOrCreate({
-        data: {
-          created_by_id: authUser._id,
-        },
-        settings_override: {
-          video: { enabled: false },
-          audio: { enabled: true }
-        },
-        ringing: { timeout: 30000 }
-      });
-      
-      toast.dismiss("call");
-      navigate(`/call/${callId}?type=audio`);
-      
-      // ✅ REMOVED call.join() - CallPage handles join
-      
-    } catch (error) {
-      console.error("Error starting audio call:", error);
-      toast.error(error.message || "Failed to start audio call");
-      toast.dismiss("call");
-    } finally {
-      setIsJoiningCall(false);
-    }
-  };
+    // ✅ Setup call with members so ringing triggers correctly
+    await call.getOrCreate({
+      data: {
+        members: [
+          { user_id: authUser._id.toString() },
+          { user_id: targetUserId.toString() },
+        ],
+      },
+      ringing: true,
+      settings_override: {
+        video: { enabled: false },
+        audio: { enabled: true }
+      }
+    });
+    
+    // 🔥 Trigger ringing on receiver's side
+    await call.ring();
+    
+    console.log("🔔 Audio call ringing initiated for:", callId);
+    toast.dismiss("call");
+    toast.success("Calling...");
+    
+    navigate(`/call/${callId}?type=audio`);
+    
+  } catch (error) {
+    console.error("Error starting audio call:", error);
+    toast.error(error.message || "Failed to start audio call");
+    toast.dismiss("call");
+  } finally {
+    setIsJoiningCall(false);
+  }
+};
 
   const handleVoiceMessage = async (audioBlob) => {
     if (channel && isConnected) {
@@ -714,27 +785,43 @@ const ChatPage = () => {
       </div>
       
       {/* Incoming Call Modal */}
-      {incomingCall && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-base-100 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl border border-base-300">
-            <div className="text-center">
-              <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-r from-green-500 to-green-600 rounded-full flex items-center justify-center animate-pulse">
-                <Phone className="w-10 h-10 text-white" />
+      {incomingCall && 
+        createPortal(
+          <div className="fixed top-5 right-5 bg-black/90 text-white p-6 rounded-2xl shadow-2xl z-[99999] border border-white/20 backdrop-blur-md animate-slideIn">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center animate-pulse">
+                <Phone className="w-6 h-6 text-white" />
               </div>
-              <h2 className="text-xl font-bold text-base-content mb-2">Incoming Call</h2>
-              <p className="text-base-content/70 mb-6">{incomingCall.caller?.name || "Someone"} is calling you...</p>
-              <div className="flex gap-4 justify-center">
-                <button onClick={acceptCall} className="px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-full font-semibold transition-all duration-300 transform hover:scale-105 flex items-center gap-2">
-                  <Phone className="w-4 h-4" /> Accept
-                </button>
-                <button onClick={rejectCall} className="px-6 py-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-full font-semibold transition-all duration-300 transform hover:scale-105 flex items-center gap-2">
-                  <PhoneOff className="w-4 h-4" /> Reject
-                </button>
+              <div>
+                <p className="font-bold text-lg">Incoming Call</p>
+                <p className="text-sm text-gray-300">{incomingCall.created_by?.name || "Someone"} is calling...</p>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  acceptCall();
+                  setIncomingCall(null);
+                }} 
+                className="flex-1 py-2 bg-green-500 hover:bg-green-600 rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                <Phone className="w-4 h-4" /> Accept
+              </button>
+              <button 
+                onClick={() => {
+                  rejectCall();
+                  setIncomingCall(null);
+                }} 
+                className="flex-1 py-2 bg-red-500 hover:bg-red-600 rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                <PhoneOff className="w-4 h-4" /> Reject
+              </button>
+            </div>
+          </div>,
+          document.body
+        )
+      }
       
       {/* Chat Area */}
       <div className="flex-1 min-h-0 flex flex-col bg-base-100">

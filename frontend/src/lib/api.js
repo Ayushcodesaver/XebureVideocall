@@ -1,5 +1,7 @@
 import { axiosInstance } from "./axios";
 
+// ---------------- AUTH ----------------
+
 export const signup = async (signupData) => {
   const response = await axiosInstance.post("/auth/signup", signupData);
   return response.data;
@@ -30,6 +32,8 @@ export const completeOnboarding = async (userData) => {
   return response.data;
 };
 
+// ---------------- USERS ----------------
+
 export async function getUserFriends() {
   const response = await axiosInstance.get("/users/friends");
   return response.data;
@@ -56,16 +60,24 @@ export async function getFriendRequests() {
 }
 
 export async function acceptFriendRequest(requestId) {
-  const response = await axiosInstance.put(`/users/friend-request/${requestId}/accept`);
+  const response = await axiosInstance.put(
+    `/users/friend-request/${requestId}/accept`
+  );
   return response.data;
 }
+
+// ---------------- STREAM (🔥 FIXED) ----------------
 
 export async function getStreamToken() {
-  const response = await axiosInstance.get("/chat/token");
+  const response = await axiosInstance.get("/stream/token", {
+    withCredentials: true, // 🔥 MUST
+  });
+
   return response.data;
 }
 
-// ✅ ADD THIS FUNCTION - Remove a friend
+// ---------------- EXTRA ----------------
+
 export async function removeFriend(friendId) {
   const response = await axiosInstance.delete(`/users/friends/${friendId}`);
   return response.data;

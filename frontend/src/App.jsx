@@ -1,4 +1,3 @@
-// src/App.jsx
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import HomePage from "./pages/HomePage.jsx";
@@ -17,9 +16,15 @@ import PageLoader from "./components/PageLoader.jsx";
 import useAuthUser from "./hooks/useAuthUser.js";
 import Layout from "./components/Layout.jsx";
 import { useThemeStore } from "./store/useThemeStore.js";
-import { VideoClientProvider } from "./context/VideoClientContext.jsx";
+import { VideoClientProvider, useVideoClient } from "./context/VideoClientContext.jsx";
 
-const App = () => {
+// 🔥 ADD THIS
+import { StreamVideo } from "@stream-io/video-react-sdk";
+
+
+// 🔥 WRAPPER COMPONENT (IMPORTANT)
+const AppContent = () => {
+  const { videoClient } = useVideoClient();
   const { isLoading, authUser } = useAuthUser();
   const { theme } = useThemeStore();
 
@@ -28,11 +33,17 @@ const App = () => {
 
   if (isLoading) return <PageLoader />;
 
+  // 🔥 WAIT until videoClient ready
+  if (!videoClient) {
+    console.log("⏳ Waiting for video client...");
+    return <PageLoader />;
+  }
+
   return (
-    <VideoClientProvider>
+    <StreamVideo client={videoClient}>
       <div className="h-screen" data-theme={theme}>
         <Routes>
-          {/* All your routes here - same as before */}
+
           <Route
             path="/"
             element={
@@ -45,6 +56,7 @@ const App = () => {
               )
             }
           />
+
           <Route
             path="/friends"
             element={
@@ -57,6 +69,7 @@ const App = () => {
               )
             }
           />
+
           <Route
             path="/chats"
             element={
@@ -69,18 +82,25 @@ const App = () => {
               )
             }
           />
+
           <Route
             path="/signup"
             element={
-              !isAuthenticated ? <SignUpPage /> : <Navigate to={isOnboarded ? "/" : "/onboarding"} />
+              !isAuthenticated
+                ? <SignUpPage />
+                : <Navigate to={isOnboarded ? "/" : "/onboarding"} />
             }
           />
+
           <Route
             path="/login"
             element={
-              !isAuthenticated ? <LoginPage /> : <Navigate to={isOnboarded ? "/" : "/onboarding"} />
+              !isAuthenticated
+                ? <LoginPage />
+                : <Navigate to={isOnboarded ? "/" : "/onboarding"} />
             }
           />
+
           <Route
             path="/notifications"
             element={
@@ -93,16 +113,16 @@ const App = () => {
               )
             }
           />
+
           <Route
             path="/call/:id"
             element={
-              isAuthenticated && isOnboarded ? (
-                <CallPage />
-              ) : (
-                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
-              )
+              isAuthenticated && isOnboarded
+                ? <CallPage />
+                : <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
             }
           />
+
           <Route
             path="/chat/:id"
             element={
@@ -115,6 +135,7 @@ const App = () => {
               )
             }
           />
+
           <Route
             path="/onboarding"
             element={
@@ -129,31 +150,42 @@ const App = () => {
               )
             }
           />
+
         </Routes>
 
-        <Toaster 
+        <Toaster
           position="top-right"
           toastOptions={{
             duration: 3000,
             style: {
-              background: '#00A19B',
-              color: '#fff',
-              borderRadius: '12px',
+              background: "#00A19B",
+              color: "#fff",
+              borderRadius: "12px",
             },
             success: {
               iconTheme: {
-                primary: '#fff',
-                secondary: '#00A19B',
+                primary: "#fff",
+                secondary: "#00A19B",
               },
             },
             error: {
               style: {
-                background: '#f87272',
+                background: "#f87272",
               },
             },
           }}
         />
       </div>
+    </StreamVideo>
+  );
+};
+
+
+// 🔥 MAIN APP
+const App = () => {
+  return (
+    <VideoClientProvider>
+      <AppContent />
     </VideoClientProvider>
   );
 };

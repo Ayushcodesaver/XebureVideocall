@@ -1,24 +1,17 @@
-import { createContext, useContext, useRef, useEffect, useState } from 'react';
-import { StreamVideoClient } from '@stream-io/video-react-sdk';
-import useAuthUser from '../hooks/useAuthUser';
-import { useQuery } from '@tanstack/react-query';
-import { getStreamToken } from '../lib/api';
+import { createContext, useContext, useEffect, useState } from "react";
+import { StreamVideoClient } from "@stream-io/video-client"; // 🔥 FIX
+import useAuthUser from "../hooks/useAuthUser";
+import { useQuery } from "@tanstack/react-query";
+import { getStreamToken } from "../lib/api";
 
 const STREAM_API_KEY = import.meta.env.VITE_STREAM_API_KEY;
 
 const VideoClientContext = createContext(null);
 
-export const useVideoClient = () => {
-  const context = useContext(VideoClientContext);
-  if (!context) {
-    throw new Error('useVideoClient must be used within VideoClientProvider');
-  }
-  return context;
-};
+export const useVideoClient = () => useContext(VideoClientContext);
 
 export const VideoClientProvider = ({ children }) => {
-  const videoClientRef = useRef(null);
-  const [videoClient, setVideoClient] = useState(null); // ✅ State for reactivity
+  const [videoClient, setVideoClient] = useState(null);
   const { authUser } = useAuthUser();
 
   const { data: tokenData } = useQuery({
@@ -28,43 +21,52 @@ export const VideoClientProvider = ({ children }) => {
   });
 
   useEffect(() => {
-    if (!tokenData?.token || !authUser) return;
+    if (!authUser || !tokenData?.token) {
+      console.log("⛔ Waiting for authUser or token...");
+      return;
+    }
 
-    // ✅ prevent multiple instances
-    if (videoClientRef.current) return;
+    let client;
 
-    console.log("✅ Creating SINGLE video client...");
+    const init = async () => {
+      try {
+        console.log("🚀 INIT VIDEO CLIENT");
 
-    const client = new StreamVideoClient({
-      apiKey: STREAM_API_KEY,
-      user: {
-        id: authUser._id,
-        name: authUser.fullName,
-        image: authUser.profilePic,
-      },
-      token: tokenData.token,
-    });
+        client = new StreamVideoClient({
+          apiKey: STREAM_API_KEY,
+        });
 
-    videoClientRef.current = client;
-    setVideoClient(client); // ✅ Update state for reactivity
+        await client.connectUser(
+          {
+            id: authUser._id.toString(),
+            name: authUser.fullName,
+            image: authUser.profilePic,
+          },
+          tokenData.token
+        );
+
+        console.log("✅ CONNECTED SUCCESS:", {
+          userId: client.user?.id,
+          ws: client.wsConnection?.state,
+        });
+
+        setVideoClient(client);
+      } catch (err) {
+        console.error("❌ CONNECT USER FAILED:", err);
+      }
+    };
+
+    init();
 
     return () => {
-      // ✅ Cleanup only on unmount, not on every re-render
-      // Disconnect will be handled by disconnectVideoClient on logout
+      if (client) {
+        client.disconnectUser();
+      }
     };
-  }, [tokenData, authUser]);
-
-  const disconnectVideoClient = async () => {
-    if (videoClientRef.current) {
-      console.log("🔌 Disconnecting video client...");
-      await videoClientRef.current.disconnectUser();
-      videoClientRef.current = null;
-      setVideoClient(null); // ✅ Clear state
-    }
-  };
+  }, [authUser, tokenData]);
 
   return (
-    <VideoClientContext.Provider value={{ videoClient: videoClient || videoClientRef.current, disconnectVideoClient }}>
+    <VideoClientContext.Provider value={{ videoClient }}>
       {children}
     </VideoClientContext.Provider>
   );

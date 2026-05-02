@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import useAuthUser from "../hooks/useAuthUser";
 import { useVideoClient } from "../context/VideoClientContext";
 
@@ -27,16 +27,18 @@ import {
   Volume2,
   VolumeX,
   X,
+  Phone,
+  Check,
 } from "lucide-react";
 
 const CallPage = () => {
   const { id: callId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { videoClient } = useVideoClient();
   const [call, setCall] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isVolumeMuted, setIsVolumeMuted] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [selectedCamera, setSelectedCamera] = useState("");
@@ -44,33 +46,25 @@ const CallPage = () => {
   const [availableCameras, setAvailableCameras] = useState([]);
   const [availableMics, setAvailableMics] = useState([]);
   const [participantCount, setParticipantCount] = useState(1);
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
-  const [volumeLevel, setVolumeLevel] = useState(100);
+  const [isRinging, setIsRinging] = useState(false);
+  const [isCallAccepted, setIsCallAccepted] = useState(false);
   
-  // ✅ Use refs for cleanup handlers
+  // Refs for cleanup
   const timerRef = useRef(null);
-  const updateParticipantCountRef = useRef(null);
-  const startTimerRef = useRef(null);
-  const callEndedRef = useRef(null);
   const callInstanceRef = useRef(null);
   const isUserEndingCallRef = useRef(false);
   const hasJoinedRef = useRef(false);
   const timerStartedRef = useRef(false);
-  
-  // ✅ Volume control refs (Web Audio API)
-  const audioContextRef = useRef(null);
-  const gainNodeRef = useRef(null);
-  const sourceStreamRef = useRef(null);
-  const isVolumeMutedRef = useRef(false);
+  const waitingRingtoneRef = useRef(null);
 
   const { authUser, isLoading } = useAuthUser();
 
-  // ✅ Safer boolean checks
+  // Call state
   const isMuted = call?.microphone?.state?.muted === true;
   const isVideoOff = call?.camera?.state?.enabled === false;
   const isScreenSharingSync = call?.screenShare?.state?.enabled === true;
 
-  // ✅ Device effect
+  // Get devices
   useEffect(() => {
     const getDevices = async () => {
       try {
@@ -99,95 +93,14 @@ const CallPage = () => {
     setIsScreenSharing(isScreenSharingSync);
   }, [isScreenSharingSync]);
 
-  // ✅ Setup Web Audio for real volume control
-  useEffect(() => {
-    if (!call) return;
-
-    const setupAudioControl = async () => {
-      try {
-        // Get local audio stream
-        const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        sourceStreamRef.current = localStream;
-        
-        // Create Audio Context
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const audioContext = new AudioContext();
-        audioContextRef.current = audioContext;
-        
-        // Create Gain Node (for volume control)
-        const gainNode = audioContext.createGain();
-        gainNodeRef.current = gainNode;
-        gainNode.gain.value = volumeLevel / 100; // Set initial volume
-        
-        // Create source from stream
-        const source = audioContext.createMediaStreamSource(localStream);
-        source.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        // Resume AudioContext on user interaction
-        if (audioContext.state === 'suspended') {
-          const resumeAudio = () => {
-            audioContext.resume();
-            document.removeEventListener('click', resumeAudio);
-          };
-          document.addEventListener('click', resumeAudio);
-        }
-        
-        console.log("🎵 Audio control initialized");
-      } catch (error) {
-        console.error("Failed to setup audio control:", error);
-      }
-    };
-
-    setupAudioControl();
-
-    return () => {
-      // Cleanup
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-      if (sourceStreamRef.current) {
-        sourceStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [call]);
-
-  // Switch camera
-  const switchCamera = async (deviceId) => {
-    if (call) {
-      try {
-        await call.camera.setDevice(deviceId);
-        setSelectedCamera(deviceId);
-        toast.success("Camera switched");
-      } catch (error) {
-        console.error("Error switching camera:", error);
-        toast.error("Failed to switch camera");
-      }
-    }
-  };
-
-  // Switch microphone
-  const switchMicrophone = async (deviceId) => {
-    if (call) {
-      try {
-        await call.microphone.setDevice(deviceId);
-        setSelectedMic(deviceId);
-        toast.success("Microphone switched");
-      } catch (error) {
-        console.error("Error switching microphone:", error);
-        toast.error("Failed to switch microphone");
-      }
-    }
-  };
-
-  // Format call duration
+  // Format duration
   const formatDuration = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // ✅ Stable handlers
+  // Update participant count
   const updateParticipantCount = useCallback(() => {
     if (callInstanceRef.current?.state?.participants) {
       const count = callInstanceRef.current.state.participants.size;
@@ -195,6 +108,7 @@ const CallPage = () => {
     }
   }, []);
 
+  // Start timer
   const startTimer = useCallback(() => {
     if (timerStartedRef.current) return;
     if (timerRef.current) clearInterval(timerRef.current);
@@ -205,16 +119,20 @@ const CallPage = () => {
     }, 1000);
   }, []);
 
-  // ✅ Fixed handleParticipantJoined - no stale closure
+  // Handle participant joined
   const handleParticipantJoined = useCallback((e) => {
     const participantName = e.participant?.name || "Someone";
-
-    // Read latest count from ref, not state
     const count = callInstanceRef.current?.state?.participants?.size || 1;
-
     setParticipantCount(count);
+    setIsCallAccepted(true);
 
-    // Only show toast for additional participants (not self)
+    // Stop waiting ringtone
+    if (waitingRingtoneRef.current) {
+      waitingRingtoneRef.current.pause();
+      waitingRingtoneRef.current.currentTime = 0;
+      setIsRinging(false);
+    }
+
     if (count > 1) {
       toast.success(`${participantName} joined the call`, {
         duration: 3000,
@@ -223,12 +141,20 @@ const CallPage = () => {
     }
   }, []);
 
+  // Handle call ended
   const handleCallEnded = useCallback(() => {
     if (isUserEndingCallRef.current) return;
+    
+    if (waitingRingtoneRef.current) {
+      waitingRingtoneRef.current.pause();
+      waitingRingtoneRef.current.currentTime = 0;
+    }
+    
     toast.success("Call ended");
     navigate("/");
   }, [navigate]);
 
+  // Handle connection change
   const handleConnectionChange = useCallback((e) => {
     if (e.online === false) {
       toast.error("Network connection lost. Please check your internet.");
@@ -237,12 +163,7 @@ const CallPage = () => {
     }
   }, []);
 
-  // Store refs for cleanup
-  updateParticipantCountRef.current = updateParticipantCount;
-  startTimerRef.current = startTimer;
-  callEndedRef.current = handleCallEnded;
-
-  // ✅ Initialize call with JOIN LOCK
+  // Initialize call
   useEffect(() => {
     let isMounted = true;
 
@@ -253,42 +174,83 @@ const CallPage = () => {
         return;
       }
 
-      hasJoinedRef.current = true;
-
       try {
-        console.log("Joining call using shared video client...");
-
+        console.log("📞 Initializing call:", callId);
+        
         const callInstance = videoClient.call("default", callId);
         callInstanceRef.current = callInstance;
-
-        if (!callInstance.state?.joined) {
+        
+        // Check if current user is the caller
+        const isUserCaller = callInstance.state?.createdBy?.id === authUser._id;
+        
+        // If caller and call not started, show waiting/ringing
+        if (isUserCaller && !callInstance.state?.call?.started_at) {
+          setIsRinging(true);
+          
+          // Play waiting ringtone for caller
+          waitingRingtoneRef.current = new Audio("/waiting-ringtone.mp3");
+          waitingRingtoneRef.current.loop = true;
+          waitingRingtoneRef.current.play().catch(e => console.log("Audio play failed:", e));
+          
+          // Listen for call started event
+          callInstance.on("call.started", () => {
+            setIsRinging(false);
+            setIsCallAccepted(true);
+            if (waitingRingtoneRef.current) {
+              waitingRingtoneRef.current.pause();
+              waitingRingtoneRef.current.currentTime = 0;
+            }
+            startTimer();
+          });
+        }
+        
+        // Join the call
+        if (!callInstance.state?.joined && !hasJoinedRef.current) {
+          hasJoinedRef.current = true;
           await callInstance.join().catch((err) => {
             console.error("Join failed:", err);
+            hasJoinedRef.current = false;
             toast.error("Failed to join call");
           });
         }
-
+        
+        // 🔥 Handle call type (audio/video) from URL query params
+        const type = new URLSearchParams(location.search).get("type");
+        if (type === "audio") {
+          console.log("🔊 Audio call - disabling camera");
+          await callInstance.camera.disable();
+        } else if (type === "video") {
+          console.log("📹 Video call - enabling camera");
+          await callInstance.camera.enable();
+        }
+        
         if (!isMounted) return;
-
-        console.log("Joined Xebure call successfully");
-
+        
+        console.log("✅ Successfully joined call");
+        
         // Add event listeners
-        callInstance.on("call.updated", updateParticipantCountRef.current);
+        callInstance.on("call.updated", updateParticipantCount);
         callInstance.on("participant-joined", handleParticipantJoined);
         callInstance.on("connection.changed", handleConnectionChange);
-        callInstance.on("call.ended", callEndedRef.current);
+        callInstance.on("call.ended", handleCallEnded);
         
         updateParticipantCount();
-
-        // Fixed timer start - no double start
+        
+        // Start timer if call already started
         if (callInstance.state?.call?.started_at || callInstance.state?.started) {
           startTimer();
+          setIsCallAccepted(true);
+          setIsRinging(false);
+          if (waitingRingtoneRef.current) {
+            waitingRingtoneRef.current.pause();
+            waitingRingtoneRef.current.currentTime = 0;
+          }
         } else {
           callInstance.on("call.started", () => {
-            startTimerRef.current();
+            startTimer();
           });
         }
-
+        
         setCall(callInstance);
         
       } catch (error) {
@@ -313,19 +275,24 @@ const CallPage = () => {
         timerStartedRef.current = false;
       }
       
+      if (waitingRingtoneRef.current) {
+        waitingRingtoneRef.current.pause();
+        waitingRingtoneRef.current.currentTime = 0;
+      }
+      
       if (callInstanceRef.current) {
-        callInstanceRef.current.off("call.updated", updateParticipantCountRef.current);
+        callInstanceRef.current.off("call.updated", updateParticipantCount);
         callInstanceRef.current.off("participant-joined", handleParticipantJoined);
         callInstanceRef.current.off("connection.changed", handleConnectionChange);
-        callInstanceRef.current.off("call.started", startTimerRef.current);
-        callInstanceRef.current.off("call.ended", callEndedRef.current);
+        callInstanceRef.current.off("call.started", startTimer);
+        callInstanceRef.current.off("call.ended", handleCallEnded);
         
         if (callInstanceRef.current.state?.joined) {
           callInstanceRef.current.leave();
         }
       }
     };
-  }, [videoClient, callId]);
+  }, [videoClient, callId, authUser, location]);
 
   // Toggle microphone
   const toggleMicrophone = async () => {
@@ -363,7 +330,7 @@ const CallPage = () => {
     }
   };
 
-  // ✅ Fixed screen share handler
+  // Toggle screen share
   const toggleScreenShare = async () => {
     if (!call) return;
 
@@ -381,55 +348,31 @@ const CallPage = () => {
     }
   };
 
-  // ✅ REAL volume mute using Web Audio API
-  const handleVolumeChange = (e) => {
-    const value = parseInt(e.target.value);
-    setVolumeLevel(value);
-    
-    if (gainNodeRef.current) {
-      const normalizedVolume = value / 100;
-      gainNodeRef.current.gain.value = normalizedVolume;
-      
-      if (value === 0) {
-        setIsVolumeMuted(true);
-        isVolumeMutedRef.current = true;
-      } else if (isVolumeMutedRef.current && value > 0) {
-        setIsVolumeMuted(false);
-        isVolumeMutedRef.current = false;
+  // Switch camera
+  const switchCamera = async (deviceId) => {
+    if (call) {
+      try {
+        await call.camera.setDevice(deviceId);
+        setSelectedCamera(deviceId);
+        toast.success("Camera switched");
+      } catch (error) {
+        console.error("Error switching camera:", error);
+        toast.error("Failed to switch camera");
       }
     }
   };
 
-  const toggleVolume = () => {
-    if (!gainNodeRef.current) {
-      toast.error("Audio control not available");
-      return;
-    }
-
-    try {
-      if (isVolumeMutedRef.current) {
-        // Unmute - restore volume
-        const newVolume = volumeLevel === 0 ? 100 : volumeLevel;
-        gainNodeRef.current.gain.value = newVolume / 100;
-        setIsVolumeMuted(false);
-        isVolumeMutedRef.current = false;
-        setVolumeLevel(newVolume);
-        toast.success("Volume on");
-        
-        // Resume AudioContext if suspended
-        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-          audioContextRef.current.resume();
-        }
-      } else {
-        // Mute - set volume to 0
-        gainNodeRef.current.gain.value = 0;
-        setIsVolumeMuted(true);
-        isVolumeMutedRef.current = true;
-        toast.success("Volume off");
+  // Switch microphone
+  const switchMicrophone = async (deviceId) => {
+    if (call) {
+      try {
+        await call.microphone.setDevice(deviceId);
+        setSelectedMic(deviceId);
+        toast.success("Microphone switched");
+      } catch (error) {
+        console.error("Error switching microphone:", error);
+        toast.error("Failed to switch microphone");
       }
-    } catch (error) {
-      console.error("Error toggling volume:", error);
-      toast.error("Failed to change volume");
     }
   };
 
@@ -446,6 +389,31 @@ const CallPage = () => {
   return (
     <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-gray-900 to-gray-800 relative">
       
+      {/* Ringing Overlay - When waiting for answer */}
+      {isRinging && !isCallAccepted && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-lg">
+          <div className="text-center animate-pulse">
+            <div className="w-32 h-32 mx-auto mb-6 bg-gradient-to-r from-green-500 to-green-600 rounded-full flex items-center justify-center animate-bounce shadow-2xl">
+              <Phone className="w-16 h-16 text-white transform rotate-90" />
+            </div>
+            <h2 className="text-4xl font-bold text-white mb-3">Ringing...</h2>
+            <p className="text-gray-300 text-lg">Waiting for the other person to answer</p>
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse delay-200"></div>
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse delay-400"></div>
+            </div>
+            
+            <button
+              onClick={handleEndCall}
+              className="mt-10 px-10 py-4 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 rounded-full text-white font-semibold transition-all transform hover:scale-105 shadow-xl"
+            >
+              Cancel Call
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -508,35 +476,7 @@ const CallPage = () => {
         </div>
       )}
 
-      {/* Volume Slider Modal */}
-      {showVolumeSlider && (
-        <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 bg-black/70 backdrop-blur-xl rounded-2xl p-4 shadow-2xl border border-white/20 w-64">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-white text-sm font-medium">Volume Control</span>
-            <button
-              onClick={() => setShowVolumeSlider(false)}
-              className="text-gray-400 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={volumeLevel}
-            onChange={handleVolumeChange}
-            className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
-          />
-          <div className="flex justify-between text-white text-xs mt-2">
-            <span>🔇</span>
-            <span>{volumeLevel}%</span>
-            <span>🔊</span>
-          </div>
-        </div>
-      )}
-
-      {/* Logo Overlay - Top Left */}
+      {/* Logo Overlay */}
       <div className="absolute top-4 left-4 z-20 flex items-center gap-3 bg-black/50 backdrop-blur-md rounded-full px-4 py-2 shadow-lg border border-white/10">
         <img 
           src="/xebure-logo.png" 
@@ -556,7 +496,7 @@ const CallPage = () => {
         </div>
       </div>
 
-      {/* Call Info Overlay - Top Right */}
+      {/* Call Info Overlay */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-3 bg-black/50 backdrop-blur-md rounded-full px-4 py-2 shadow-lg border border-white/10">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -632,18 +572,6 @@ const CallPage = () => {
                             >
                               {isScreenSharing ? <MonitorDown className="w-5 h-5 text-white" /> : <MonitorUp className="w-5 h-5 text-white" />}
                             </button>
-
-                            {/* Volume Control - Now with REAL audio */}
-                            <div className="relative">
-                              <button
-                                onClick={toggleVolume}
-                                onMouseEnter={() => setShowVolumeSlider(true)}
-                                className="p-3 rounded-full bg-gray-700 hover:bg-gray-600 transition-all duration-300 transform hover:scale-110"
-                                title={isVolumeMuted ? "Unmute volume" : "Mute volume"}
-                              >
-                                {isVolumeMuted ? <VolumeX className="w-5 h-5 text-white" /> : <Volume2 className="w-5 h-5 text-white" />}
-                              </button>
-                            </div>
 
                             {/* Settings Button */}
                             <button
