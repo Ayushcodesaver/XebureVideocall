@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUserFriends, removeFriend } from "../lib/api";
 import { MessageCircle, Video, UserMinus, Sparkles, Crown, Users } from "lucide-react";
-import { Link } from "react-router";
+import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 
 // Helper function for language flags
