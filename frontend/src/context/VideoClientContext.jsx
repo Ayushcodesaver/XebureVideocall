@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import { StreamVideoClient } from "@stream-io/video-client"; // 🔥 FIX
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { StreamVideoClient } from "@stream-io/video-react-sdk";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
 import { getStreamToken } from "../lib/api";
@@ -12,6 +12,8 @@ export const useVideoClient = () => useContext(VideoClientContext);
 
 export const VideoClientProvider = ({ children }) => {
   const [videoClient, setVideoClient] = useState(null);
+  const initRef = useRef(false); // 🔥 prevent double init
+
   const { authUser } = useAuthUser();
 
   const { data: tokenData } = useQuery({
@@ -21,10 +23,11 @@ export const VideoClientProvider = ({ children }) => {
   });
 
   useEffect(() => {
-    if (!authUser || !tokenData?.token) {
-      console.log("⛔ Waiting for authUser or token...");
-      return;
-    }
+    if (!authUser || !tokenData?.token) return;
+
+    // 🚫 stop duplicate init
+    if (initRef.current) return;
+    initRef.current = true;
 
     let client;
 
@@ -34,25 +37,22 @@ export const VideoClientProvider = ({ children }) => {
 
         client = new StreamVideoClient({
           apiKey: STREAM_API_KEY,
-        });
-
-        await client.connectUser(
-          {
+          user: {
             id: authUser._id.toString(),
             name: authUser.fullName,
             image: authUser.profilePic,
           },
-          tokenData.token
-        );
+          token: tokenData.token,
+        });
 
-        console.log("✅ CONNECTED SUCCESS:", {
+        console.log("✅ CLIENT CREATED:", {
           userId: client.user?.id,
-          ws: client.wsConnection?.state,
         });
 
         setVideoClient(client);
       } catch (err) {
-        console.error("❌ CONNECT USER FAILED:", err);
+        console.error("❌ INIT FAILED:", err);
+        initRef.current = false;
       }
     };
 
@@ -60,6 +60,7 @@ export const VideoClientProvider = ({ children }) => {
 
     return () => {
       if (client) {
+        console.log("🔌 disconnecting...");
         client.disconnectUser();
       }
     };

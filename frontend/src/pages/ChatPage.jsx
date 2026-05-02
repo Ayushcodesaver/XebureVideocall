@@ -181,7 +181,7 @@ const ChatPage = () => {
     }
 
     console.log("🎧 Setting up call listener...");
-    console.log("📹 CLIENT USER:", videoClient.user?.id);
+    console.log("📹 CLIENT USER:", videoClient?.user?.id);
 
     const handleIncomingCall = (event) => {
       console.log("📞 INCOMING CALL EVENT:", event);
@@ -195,13 +195,13 @@ const ChatPage = () => {
     };
 
     // ✅ attach listener
-    videoClient.on("call.ringing", handleIncomingCall);
+    videoClient?.on("call.ringing", handleIncomingCall);
     console.log("✅ call.ringing listener attached");
 
     // cleanup
     return () => {
       console.log("🧹 removing listener...");
-      videoClient.off("call.ringing", handleIncomingCall);
+      videoClient?.off("call.ringing", handleIncomingCall);
       stopRingtone();
     };
   }, [videoClient, playRingtone, stopRingtone]);

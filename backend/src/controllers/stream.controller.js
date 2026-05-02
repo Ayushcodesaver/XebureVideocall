@@ -1,10 +1,17 @@
-import { generateStreamToken } from "../lib/stream.js";
+import { generateStreamToken, upsertStreamUser } from "../lib/stream.js";
 
 export async function getStreamToken(req, res) {
   try {
-    const userId = req.user._id.toString(); // 🔥 MUST MATCH FRONTEND
+    const userId = req.user._id.toString();
 
-    console.log("🔥 TOKEN USER ID:", userId);
+    // 🔥 FORCE USER CREATE (MOST IMPORTANT)
+    await upsertStreamUser({
+      id: userId,
+      name: req.user.fullName || "User",
+      image: req.user.profilePic || "",
+    });
+
+    console.log("👤 STREAM USER CREATED:", userId);
 
     const token = generateStreamToken(userId);
 
