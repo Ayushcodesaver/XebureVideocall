@@ -17,42 +17,57 @@ import useAuthUser from "./hooks/useAuthUser.js";
 import Layout from "./components/Layout.jsx";
 import { useThemeStore } from "./store/useThemeStore.js";
 import { VideoClientProvider, useVideoClient } from "./context/VideoClientContext.jsx";
-
-// 🔥 ADD THIS
 import { StreamVideo } from "@stream-io/video-react-sdk";
 
-
-// 🔥 WRAPPER COMPONENT (IMPORTANT)
+// AppContent component
 const AppContent = () => {
-  const { videoClient } = useVideoClient();
+  const { videoClient, isReady } = useVideoClient(); // ✅ Use isReady flag
   const { isLoading, authUser } = useAuthUser();
   const { theme } = useThemeStore();
 
   const isAuthenticated = Boolean(authUser);
   const isOnboarded = authUser?.isOnboarded;
 
-  if (isLoading) return <PageLoader />;
-
-  // 🔥 WAIT until videoClient ready
-  if (!videoClient) {
-    console.log("⏳ Waiting for video client...");
+  // ✅ Better loading logic
+  if (isLoading) {
+    console.log("⏳ Auth loading...");
     return <PageLoader />;
   }
 
+  // ✅ Wait for video client ONLY if user is authenticated
+  if (isAuthenticated && !videoClient) {
+    console.log("⏳ Waiting for video client. isReady:", isReady);
+    return <PageLoader />;
+  }
+
+  // ✅ If user is not authenticated, don't wait for video client
+  if (!isAuthenticated) {
+    return (
+      <div className="h-screen" data-theme={theme}>
+        <Routes>
+          <Route path="/signup" element={<SignUpPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+        <Toaster position="top-right" />
+      </div>
+    );
+  }
+
+  // ✅ Authenticated user with video client ready
   return (
     <StreamVideo client={videoClient}>
       <div className="h-screen" data-theme={theme}>
         <Routes>
-
           <Route
             path="/"
             element={
-              isAuthenticated && isOnboarded ? (
+              isOnboarded ? (
                 <Layout showSidebar={true}>
                   <HomePage />
                 </Layout>
               ) : (
-                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+                <Navigate to="/onboarding" />
               )
             }
           />
@@ -60,12 +75,12 @@ const AppContent = () => {
           <Route
             path="/friends"
             element={
-              isAuthenticated && isOnboarded ? (
+              isOnboarded ? (
                 <Layout showSidebar={true}>
                   <FriendsPage />
                 </Layout>
               ) : (
-                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+                <Navigate to="/onboarding" />
               )
             }
           />
@@ -73,43 +88,35 @@ const AppContent = () => {
           <Route
             path="/chats"
             element={
-              isAuthenticated && isOnboarded ? (
+              isOnboarded ? (
                 <Layout showSidebar={true}>
                   <ChatsListPage />
                 </Layout>
               ) : (
-                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+                <Navigate to="/onboarding" />
               )
             }
           />
 
           <Route
             path="/signup"
-            element={
-              !isAuthenticated
-                ? <SignUpPage />
-                : <Navigate to={isOnboarded ? "/" : "/onboarding"} />
-            }
+            element={<Navigate to="/" />}
           />
 
           <Route
             path="/login"
-            element={
-              !isAuthenticated
-                ? <LoginPage />
-                : <Navigate to={isOnboarded ? "/" : "/onboarding"} />
-            }
+            element={<Navigate to="/" />}
           />
 
           <Route
             path="/notifications"
             element={
-              isAuthenticated && isOnboarded ? (
+              isOnboarded ? (
                 <Layout showSidebar={true}>
                   <NotificationsPage />
                 </Layout>
               ) : (
-                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+                <Navigate to="/onboarding" />
               )
             }
           />
@@ -117,21 +124,23 @@ const AppContent = () => {
           <Route
             path="/call/:id"
             element={
-              isAuthenticated && isOnboarded
-                ? <CallPage />
-                : <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+              isOnboarded ? (
+                <CallPage />
+              ) : (
+                <Navigate to="/onboarding" />
+              )
             }
           />
 
           <Route
             path="/chat/:id"
             element={
-              isAuthenticated && isOnboarded ? (
+              isOnboarded ? (
                 <Layout showSidebar={false}>
                   <ChatPage />
                 </Layout>
               ) : (
-                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+                <Navigate to="/onboarding" />
               )
             }
           />
@@ -139,18 +148,15 @@ const AppContent = () => {
           <Route
             path="/onboarding"
             element={
-              isAuthenticated ? (
-                !isOnboarded ? (
-                  <OnboardingPage />
-                ) : (
-                  <Navigate to="/" />
-                )
+              !isOnboarded ? (
+                <OnboardingPage />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/" />
               )
             }
           />
 
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
 
         <Toaster
@@ -180,8 +186,7 @@ const AppContent = () => {
   );
 };
 
-
-// 🔥 MAIN APP
+// Main App
 const App = () => {
   return (
     <VideoClientProvider>

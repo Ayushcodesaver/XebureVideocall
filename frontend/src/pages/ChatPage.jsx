@@ -32,7 +32,7 @@ const ChatPage = () => {
   const { id: targetUserId } = useParams();
   const navigate = useNavigate();
   
-  // ✅ Only take videoClient
+  // ✅ Only take videoClient from context (Chat is handled locally for now)
   const { videoClient } = useVideoClient();
   
   // ✅ Ref for live value (fixes stale closure issue)
@@ -91,6 +91,15 @@ const ChatPage = () => {
       console.log("🔥 FINAL VIDEO CLIENT:", { 
         userID: videoClient?.user?.id, 
         ws: videoClient?.wsConnection?.state, 
+      });
+
+      // 🔥🔥🔥 ADDED: Detailed debug log right when videoClient is available
+      console.log("🔥🔥🔥 VIDEO CLIENT IN CHATPAGE:", { 
+        hasUser: !!videoClient.user, 
+        userId: videoClient.user?.id, 
+        userName: videoClient.user?.name, 
+        wsState: videoClient.wsConnection?.state, 
+        isReady: !!(videoClient.user?.id && videoClient.wsConnection?.state === "connected") 
       });
     } else {
       console.log("❌ No videoClient available for user");
@@ -268,7 +277,7 @@ const ChatPage = () => {
       const client = StreamChat.getInstance(STREAM_API_KEY);
       await client.connectUser(
         {
-          id: authUser._id,
+          id: authUser._id.toString(),
           name: authUser.fullName,
           image: authUser.profilePic,
         },
@@ -320,7 +329,7 @@ const ChatPage = () => {
 
         await client.connectUser(
           {
-            id: authUser._id,
+            id: authUser._id.toString(),
             name: authUser.fullName,
             image: authUser.profilePic,
           },

@@ -66,14 +66,39 @@ export async function acceptFriendRequest(requestId) {
   return response.data;
 }
 
-// ---------------- STREAM (🔥 FIXED) ----------------
+// ---------------- STREAM (FIXED WITH DEBUG) ----------------
 
 export async function getStreamToken() {
-  const response = await axiosInstance.get("/stream/token", {
-    withCredentials: true, // 🔥 MUST
-  });
-
-  return response.data;
+  try {
+    console.log("📡 Frontend: Requesting token from /stream/token...");
+    
+    const response = await axiosInstance.get("/stream/token", {
+      withCredentials: true,
+    });
+    
+    console.log("✅ Frontend: Token response received:", {
+      status: response.status,
+      hasToken: !!response.data?.token,
+      tokenLength: response.data?.token?.length,
+      userId: response.data?.userId,
+      apiKey: response.data?.apiKey
+    });
+    
+    if (!response.data?.token) {
+      console.error("❌ No token in response!", response.data);
+      throw new Error("No token received from server");
+    }
+    
+    return response.data;
+  } catch (error) {
+    console.error("❌ Frontend: getStreamToken failed:", {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data
+    });
+    throw error;
+  }
 }
 
 // ---------------- EXTRA ----------------
