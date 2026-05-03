@@ -6,7 +6,9 @@ import {
   UsersIcon, 
   Crown,
   Sparkles,
-  LogOutIcon
+  LogOutIcon,
+  Shield,          // ✅ Add this
+  MessageCircle    // ✅ Add this (for Chats)
 } from "lucide-react";
 import { useState } from "react";
 import toast from "react-hot-toast";
@@ -27,10 +29,12 @@ const Sidebar = () => {
   const navItems = [
     { path: "/", icon: HomeIcon, label: "Home" },
     { path: "/friends", icon: UsersIcon, label: "Friends" },
-    { path: "/chats", icon: BellIcon, label: "Chats" },
+    { path: "/chats", icon: MessageCircle, label: "Chats" }, // ✅ Fixed icon
     { path: "/notifications", icon: BellIcon, label: "Notifications" },
+    { path: "/security", icon: Shield, label: "Security" }, // ✅ Added
   ];
 
+  // Rest of your code remains the same...
   return (
     <>
       {/* Desktop Sidebar - Theme aware */}
