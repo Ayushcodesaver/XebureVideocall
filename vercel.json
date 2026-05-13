@@ -2,17 +2,39 @@
   "version": 2,
   "builds": [
     {
-      "src": "frontend/**",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "frontend/dist" }
+      "src": "backend/src/server.js",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "backend/src/**",
+          "backend/src/lib/**",
+          "backend/src/models/**",
+          "backend/src/routes/**",
+          "backend/src/controllers/**",
+          "backend/src/middleware/**"
+        ]
+      }
     },
     {
-      "src": "backend/src/server.js",
-      "use": "@vercel/node"
+      "src": "frontend/**",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "frontend/dist"
+      }
     }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "backend/src/server.js" },
-    { "src": "/(.*)", "dest": "frontend/dist/$1" }
+    {
+      "src": "/api/(.*)",
+      "dest": "/backend/src/server.js"
+    },
+    {
+      "src": "/health",
+      "dest": "/backend/src/server.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/dist/$1"
+    }
   ]
 }
